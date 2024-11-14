@@ -28,8 +28,12 @@ def main():
                 logger.info(f"正在追踪钱包 {wallet} 的 {token} 代币转账记录...")
                 
                 try:
-                    transfers = tracker.get_token_transfers(wallet, token)
-                    
+                    # ransfers = tracker.get_token_transfers(wallet, token)
+                    # 只获取转入的 SPL 代币转账
+                    # transfers = tracker.get_token_transfers(wallet, token, direction='in', token_type='spl')
+                    # 只获取转出的 SOL 转账
+                    # transfers = tracker.get_token_transfers(wallet, token, direction='out', token_type='sol')
+                    transfers = tracker.get_token_transfers(wallet, token, direction='out', token_type='spl')
                     if not transfers.empty:
                         transfers.to_csv(output_file, index=False)
                         logger.info(f"已找到 {len(transfers)} 条转账记录，已保存到 {output_file}")

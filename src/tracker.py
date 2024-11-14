@@ -4,6 +4,8 @@ import pandas as pd
 from typing import List, Dict, Optional
 from utils import is_valid_solana_address, setup_logging
 from config import Config
+import base58
+import bytes
 
 logger = setup_logging()
 
@@ -51,23 +53,63 @@ class WalletTracker:
             logger.error(f"RPC 请求失败: {str(e)}")
             raise
 
-    def _get_transaction_signatures(self, wallet_address: str) -> List[str]:
-        """获取地址的交易签名列表"""
+    def _get_transaction_signatures(self, wallet_address: str, direction: str = 'all', token_type: str = 'all') -> List[str]:
+        """获取地址的转账类型交易签名列表"""
+        filters = []
+        
+        # 添加转账方向过滤
+        if direction == 'in':
+            filters.append({
+                "dataSize": 20,  # Transfer instruction data size
+            })
+            filters.append({
+                "memcmp": {
+                    "offset": 36,  # Destination address offset in transfer instruction
+                    "bytes": wallet_address
+                }
+            })
+        elif direction == 'out':
+            filters.append({
+                "dataSize": 20,  # Transfer instruction data size
+            })
+            filters.append({
+                "memcmp": {
+                    "offset": 4,  # Source address offset in transfer instruction
+                    "bytes": wallet_address
+                }
+            })
+        
+        # 添加代币类型过滤
+        if token_type == 'spl':
+            # SPL Token program ID: TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA
+            filters.append({
+                "memcmp": {
+                    "offset": 0,
+                    "bytes": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+                }
+            })
+        elif token_type == 'sol':
+            # System Program ID: 11111111111111111111111111111111
+            filters.append({
+                "memcmp": {
+                    "offset": 0,
+                    "bytes": "11111111111111111111111111111111"
+                }
+            })
+        
         params = [
             wallet_address,
             {
-                "limit": 100  # 调试阶段只获取最近100条
+                "limit": 100,
+                "commitment": "confirmed",
+                "filters": filters
             }
         ]
         
         try:
             result = self._make_rpc_request("getSignaturesForAddress", params)
-            signatures = []
-            if 'result' in result:
-                for item in result['result']:
-                    sig = item.get('signature')
-                    signatures.append(sig)
-                    logger.info(f"获取到签名: {sig}")
+            signatures = [item['signature'] for item in result.get('result', []) if item.get('err') is None]
+            logger.info(f"找到 {len(signatures)} 条符合条件的交易签名")
             return signatures
         except Exception as e:
             logger.error(f"获取交易签名失败: {str(e)}")
@@ -157,54 +199,60 @@ class WalletTracker:
         
         return address in PROTOCOL_ADDRESSES.values()
 
-    def get_token_transfers(self, wallet_address: str, token_address: str) -> pd.DataFrame:
-        """获取指定钱包和代币的转账记录"""
-        if not is_valid_solana_address(wallet_address) or not is_valid_solana_address(token_address):
-            raise ValueError("无效的钱包地址或代币地址")
+    def get_token_transfers(self, wallet_address: str, token_address: str, direction: str = 'all', token_type: str = 'all') -> pd.DataFrame:
+        """获取指定钱包和代币的转账记录
         
-        # 获取签名列表
-        logger.info(f"正在获取钱包 {wallet_address} 的最近100条交易签名...")
-        try:
-            signatures = self._get_transaction_signatures(wallet_address)
-            logger.info(f"找到 {len(signatures)} 条交易记录")
-            for i, sig in enumerate(signatures, 1):
-                logger.info(f"第 {i} 条签名: {sig}")
-        except Exception as e:
-            logger.error(f"获取交易签名失败: {str(e)}")
-            return pd.DataFrame()
+        Args:
+            wallet_address: 钱包地址
+            token_address: 代币地址
+            direction: 转账方向 ('in', 'out', 'all')
+            token_type: 代币类型 ('sol', 'spl', 'all')
+        """
+        if not is_valid_solana_address(wallet_address):
+            raise ValueError("无效的钱包地址")
+            
+        logger.info(f"正在获取钱包 {wallet_address} 的转账记录...")
+        logger.info(f"筛选条件: 方向={direction}, 代币类型={token_type}")
         
-        # 解析交易
         transfers = []
-        raw_transactions = []  # 保存原始交易数据
+        raw_transactions = []
         
-        for sig_batch in self._batch_signatures(signatures):
-            logger.info(f"正在解析一批 {len(sig_batch)} 条交易...")
-            try:
-                txns = self._get_parsed_transactions(sig_batch)
-                raw_transactions.extend(txns)  # 收集原始交易数据
-                
-                for txn in txns:
-                    try:
-                        transfer = self._parse_transaction(txn, wallet_address, token_address)
-                        if transfer:
-                            logger.info(f"找到一笔转账: {transfer}")
-                            transfers.append(transfer)
-                    except Exception as e:
-                        logger.error(f"解析单笔交易失败: {str(e)}")
-                        continue
+        try:
+            signatures = self._get_transaction_signatures(wallet_address, direction, token_type)
+            logger.info(f"找到 {len(signatures)} 条交易记录")
+            
+            # 批量处理签名
+            for sig_batch in self._batch_signatures(signatures):
+                try:
+                    txns = self._get_parsed_transactions(sig_batch)
+                    raw_transactions.extend(txns)
                     
-            except Exception as e:
-                logger.error(f"获取交易详情失败: {str(e)}")
-                continue
-        
-        # 保存原始交易数据到文件
-        with open(f"debug_transactions_{wallet_address[:8]}.json", 'w') as f:
-            json.dump(raw_transactions, f, indent=2)
-        logger.info(f"已保存原始交易数据到 debug_transactions_{wallet_address[:8]}.json")
-        
-        logger.info(f"解析完成，找到 {len(transfers)} 条转账记录")
-        
-        if transfers:
-            df = pd.DataFrame(transfers)
-            return df[['timestamp', 'from_address', 'to_address', 'token', 'amount']]
+                    for txn in txns:
+                        try:
+                            transfer = self._parse_transaction(txn, wallet_address, token_address)
+                            if transfer:
+                                logger.info(f"找到一笔转账: {transfer}")
+                                transfers.append(transfer)
+                        except Exception as e:
+                            logger.error(f"解析单笔交易失败: {str(e)}")
+                            continue
+                        
+                except Exception as e:
+                    logger.error(f"获取交易详情失败: {str(e)}")
+                    continue
+            
+            # 保存原始交易数据到文件
+            with open(f"debug_transactions_{wallet_address[:8]}.json", 'w') as f:
+                json.dump(raw_transactions, f, indent=2)
+            logger.info(f"已保存原始交易数据到 debug_transactions_{wallet_address[:8]}.json")
+            
+            logger.info(f"解析完成，找到 {len(transfers)} 条转账记录")
+            
+            if transfers:
+                df = pd.DataFrame(transfers)
+                return df[['timestamp', 'from_address', 'to_address', 'token', 'amount']]
+                
+        except Exception as e:
+            logger.error(f"处理钱包 {wallet_address} 时发生错误: {str(e)}")
+            
         return pd.DataFrame() 

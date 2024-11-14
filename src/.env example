@@ -1,5 +1,5 @@
 # Solana RPC 节点配置
-QUICKNODE_RPC_URL=https://polished-capable-water.solana-mainnet.quiknode.pro/5d1274f0356979aca41e585582ceb4eda477358e
+QUICKNODE_RPC_URL=https://polished-capable-water.solana-mainnet.quiknode.pro/5d1274f0356979aca41e585582ceb4edaeeeee
 
 # 代理配置
 USE_PROXY=true

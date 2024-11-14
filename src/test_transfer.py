@@ -67,5 +67,5 @@ def get_transfer_info(signature: str):
 
 if __name__ == "__main__":
     # 在这里输入要查询的签名
-    signature = "4eLiHLXJWQA5YupP3XvwMuMPtc19jE2AhF2PKF7D9DdZVjgb1NsJ8aoD7o1tQYgXwsRvW8RE9MYUSxce9rMvDcAi"
+    signature = "3qwS8EXihUFkMWsgSsVPqczRFhYkoHBUntfNVEB8r8iwk8wAL9Xd9YWeVpwj1Wg95y3U9ZWSe8ihwK3a2jz5iigX"
     get_transfer_info(signature) 
