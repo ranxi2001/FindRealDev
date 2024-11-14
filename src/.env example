@@ -1,0 +1,18 @@
+# Solana RPC 节点配置
+QUICKNODE_RPC_URL=https://polished-capable-water.solana-mainnet.quiknode.pro/5d1274f0356979aca41e585582ceb4eda477358e
+
+# 代理配置
+USE_PROXY=true
+HTTP_PROXY=http://127.0.0.1:7890
+HTTPS_PROXY=http://127.0.0.1:7890
+
+# 其他配置参数
+MAX_TRANSACTIONS=1000
+BATCH_SIZE=50
+
+# 过滤地址列表
+FILTER_ADDRESSES=["RaydiumV2Serum123", "PumpBondingCurve456"]
+
+# 日志配置
+LOG_LEVEL="INFO"
+LOG_FILE="wallet_tracker.log" 

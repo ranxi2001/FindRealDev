@@ -1,0 +1,5 @@
+solana
+python-dotenv
+numpy
+pandas
+requests
