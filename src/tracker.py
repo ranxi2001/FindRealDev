@@ -53,63 +53,20 @@ class WalletTracker:
             logger.error(f"RPC 请求失败: {str(e)}")
             raise
 
-    def _get_transaction_signatures(self, wallet_address: str, direction: str = 'all', token_type: str = 'all') -> List[str]:
+    def _get_transaction_signatures(self, wallet_address: str) -> List[str]:
         """获取地址的转账类型交易签名列表"""
-        filters = []
-        
-        # 添加转账方向过滤
-        if direction == 'in':
-            filters.append({
-                "dataSize": 20,  # Transfer instruction data size
-            })
-            filters.append({
-                "memcmp": {
-                    "offset": 36,  # Destination address offset in transfer instruction
-                    "bytes": wallet_address
-                }
-            })
-        elif direction == 'out':
-            filters.append({
-                "dataSize": 20,  # Transfer instruction data size
-            })
-            filters.append({
-                "memcmp": {
-                    "offset": 4,  # Source address offset in transfer instruction
-                    "bytes": wallet_address
-                }
-            })
-        
-        # 添加代币类型过滤
-        if token_type == 'spl':
-            # SPL Token program ID: TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA
-            filters.append({
-                "memcmp": {
-                    "offset": 0,
-                    "bytes": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
-                }
-            })
-        elif token_type == 'sol':
-            # System Program ID: 11111111111111111111111111111111
-            filters.append({
-                "memcmp": {
-                    "offset": 0,
-                    "bytes": "11111111111111111111111111111111"
-                }
-            })
-        
         params = [
             wallet_address,
             {
                 "limit": 100,
-                "commitment": "confirmed",
-                "filters": filters
+                "commitment": "confirmed"
             }
         ]
         
         try:
             result = self._make_rpc_request("getSignaturesForAddress", params)
             signatures = [item['signature'] for item in result.get('result', []) if item.get('err') is None]
-            logger.info(f"找到 {len(signatures)} 条符合条件的交易签名")
+            logger.info(f"找到 {len(signatures)} 条交易签名")
             return signatures
         except Exception as e:
             logger.error(f"获取交易签名失败: {str(e)}")
@@ -141,7 +98,7 @@ class WalletTracker:
         
         return transactions
 
-    def _parse_transaction(self, txn: Dict, wallet_address: str, token_address: str) -> Optional[Dict]:
+    def _parse_transaction(self, txn: Dict, wallet_address: str, token_address: str, direction: str = 'all', token_type: str = 'all') -> Optional[Dict]:
         """解析交易信息，提取转账详情"""
         if not txn or 'meta' not in txn:
             return None
@@ -150,7 +107,10 @@ class WalletTracker:
             # 检查是否包含代币转账
             instructions = txn['transaction']['message']['instructions']
             for ix in instructions:
-                if ix.get('program') != 'spl-token':
+                # 检查代币类型
+                if token_type == 'spl' and ix.get('program') != 'spl-token':
+                    continue
+                if token_type == 'sol' and ix.get('program') != 'system':
                     continue
                     
                 # 检查是否是转账操作
@@ -160,7 +120,13 @@ class WalletTracker:
                 info = ix['parsed']['info']
                     
                 # 检查是否是目标代币
-                if info.get('mint') != token_address:
+                if token_type == 'spl' and info.get('mint') != token_address:
+                    continue
+                    
+                # 检查转账方向
+                if direction == 'in' and info.get('destination') != wallet_address:
+                    continue
+                if direction == 'out' and info.get('source') != wallet_address:
                     continue
                     
                 # 过滤协议地址
@@ -172,7 +138,7 @@ class WalletTracker:
                     'timestamp': txn.get('blockTime'),
                     'from_address': info.get('source'),
                     'to_address': info.get('destination'),
-                    'token': token_address,
+                    'token': token_address if token_type == 'spl' else 'SOL',
                     'amount': float(info.get('tokenAmount', {}).get('uiAmountString', 0))
                 }
                     
@@ -218,7 +184,7 @@ class WalletTracker:
         raw_transactions = []
         
         try:
-            signatures = self._get_transaction_signatures(wallet_address, direction, token_type)
+            signatures = self._get_transaction_signatures(wallet_address)
             logger.info(f"找到 {len(signatures)} 条交易记录")
             
             # 批量处理签名
